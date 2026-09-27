@@ -28,11 +28,23 @@ def root():
         "message": "Ransomware IR Orchestrator is running",
         "status": "operational"
     }
-
-
 @app.post("/webhook/edr")
 def receive_edr_alert(alert: dict):
+    alert_id = alert.get("alert_id")
+    severity = alert.get("severity")
+    hostname = alert.get("hostname")
+    ip = alert.get("ip")
+    user = alert.get("user")
+    process = alert.get("process")
+    sha256 = alert.get("sha256")
+
     return {
-        "message": "EDR alert received",
-        "alert": alert
+        "message": "EDR alert processed",
+        "alert_id": alert_id,
+        "severity": severity,
+        "hostname": hostname,
+        "ip": ip,
+        "user": user,
+        "process": process,
+        "sha256": sha256
     }
