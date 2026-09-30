@@ -17,6 +17,7 @@ class EDRAlert(BaseModel):
     user: str
     process: str
     sha256: str
+    
 class Incident(BaseModel):
     incident_id: str
     alert_id: str
@@ -37,6 +38,13 @@ def root():
     }
 @app.post("/webhook/edr")
 def receive_edr_alert(alert: EDRAlert):
+    severity = alert.severity.lower()
+
+    if severity in ["critical", "high"]:
+        status = "RESPONSE_REQUIRED"
+    else:
+        status = "MONITOR"
+
     incident = Incident(
         incident_id=f"INC-{uuid4().hex[:8]}",
         alert_id=alert.alert_id,
@@ -46,10 +54,9 @@ def receive_edr_alert(alert: EDRAlert):
         user=alert.user,
         process=alert.process,
         sha256=alert.sha256,
-        status="NEW"
+        status=status,
     )
-
     return {
         "message": "EDR alert received and incident created",
-        "incident": incident
+        "incident": incident,
     }
