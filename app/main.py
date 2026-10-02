@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
 from uuid import uuid4
 
@@ -7,7 +7,7 @@ app = FastAPI(
     description="Automated ransomware containment and incident response platform",
     version="0.1.0"
 )
-
+WEBHOOK_SECRET = "dev-edr-secret-123"
 
 class EDRAlert(BaseModel):
     alert_id: str
@@ -37,7 +37,10 @@ def root():
         "status": "operational"
     }
 @app.post("/webhook/edr")
-def receive_edr_alert(alert: EDRAlert):
+def receive_edr_alert(
+    alert: EDRAlert,
+    x_webhook_secret: str = Header(...)
+):
     severity = alert.severity.lower()
 
     if severity in ["critical", "high"]:
