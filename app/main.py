@@ -17,7 +17,23 @@ class EDRAlert(BaseModel):
     user: str
     process: str
     sha256: str
-    
+
+
+class AlertIndicators(BaseModel):
+    hostname: str
+    ip: str
+    user: str
+    process: str
+    sha256: str
+def extract_indicators(alert: EDRAlert) -> AlertIndicators:
+    return AlertIndicators(
+        hostname=alert.hostname,
+        ip=alert.ip,
+        user=alert.user,
+        process=alert.process,
+        sha256=alert.sha256
+    )
+
 class Incident(BaseModel):
     incident_id: str
     alert_id: str
@@ -47,7 +63,7 @@ def receive_edr_alert(
         status = "RESPONSE_REQUIRED"
     else:
         status = "MONITOR"
-
+    indicators = extract_indicators(alert)
     incident = Incident(
         incident_id=f"INC-{uuid4().hex[:8]}",
         alert_id=alert.alert_id,
@@ -60,6 +76,7 @@ def receive_edr_alert(
         status=status,
     )
     return {
-        "message": "EDR alert received and incident created",
-        "incident": incident,
+    "message": "EDR alert received and incident created",
+    "incident": incident,
+    "extracted_indicators": indicators,
     }
