@@ -58,3 +58,26 @@ Ransomware-IR-Orchestrator/
 ├── requirements.txt
 ├── README.md
 └── .gitignore
+
+## Week 1 Progress
+
+### Day 7 — EDR Ingestion Pipeline Validation
+
+The Week 1 EDR ingestion pipeline was tested end-to-end.
+
+Validated:
+
+- Webhook authentication
+- EDR alert payload validation
+- Alert indicator extraction
+- Hostname extraction
+- IP extraction
+- User extraction
+- Process extraction
+- SHA-256 extraction
+- Severity classification
+- Incident creation
+
+The complete pipeline was successfully tested using a sandbox EDR alert through the FastAPI webhook.
+
+**Status: Week 1 complete.**
