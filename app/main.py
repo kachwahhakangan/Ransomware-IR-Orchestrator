@@ -3,15 +3,19 @@ from pydantic import BaseModel
 from uuid import uuid4
 
 
+# Initialize FastAPI application
 app = FastAPI(
     title="Ransomware IR Orchestrator",
     description="Automated ransomware containment and incident response platform",
     version="0.1.0"
 )
 
+
+# Development-only webhook secret
 WEBHOOK_SECRET = "dev-edr-secret-123"
 
 
+# Model for incoming EDR alerts
 class EDRAlert(BaseModel):
     alert_id: str
     severity: str
@@ -22,6 +26,7 @@ class EDRAlert(BaseModel):
     sha256: str
 
 
+# Model for extracted alert indicators
 class AlertIndicators(BaseModel):
     hostname: str
     ip: str
@@ -30,6 +35,7 @@ class AlertIndicators(BaseModel):
     sha256: str
 
 
+# Extract important indicators from an alert
 def extract_indicators(alert: EDRAlert) -> AlertIndicators:
     return AlertIndicators(
         hostname=alert.hostname,
@@ -40,6 +46,7 @@ def extract_indicators(alert: EDRAlert) -> AlertIndicators:
     )
 
 
+# Model for an incident
 class Incident(BaseModel):
     incident_id: str
     alert_id: str
@@ -52,6 +59,7 @@ class Incident(BaseModel):
     status: str
 
 
+# Model for a containment request
 class ContainmentAction(BaseModel):
     action: str
     hostname: str
@@ -59,6 +67,15 @@ class ContainmentAction(BaseModel):
     management_connection: str
 
 
+# Model for the containment execution result
+class ContainmentResult(BaseModel):
+    hostname: str
+    action: str
+    result: str
+    management_connection: str
+
+
+# Create a simulated host containment request
 def contain_host(hostname: str) -> ContainmentAction:
     return ContainmentAction(
         action="NETWORK_ISOLATION",
@@ -68,6 +85,19 @@ def contain_host(hostname: str) -> ContainmentAction:
     )
 
 
+# Simulate execution of a containment request
+def execute_containment(
+    action: ContainmentAction
+) -> ContainmentResult:
+    return ContainmentResult(
+        hostname=action.hostname,
+        action=action.action,
+        result="SIMULATED_SUCCESS",
+        management_connection=action.management_connection
+    )
+
+
+# Root endpoint
 @app.get("/")
 def root():
     return {
@@ -76,28 +106,40 @@ def root():
     }
 
 
+# Receive and process EDR alerts
 @app.post("/webhook/edr")
 def receive_edr_alert(
     alert: EDRAlert,
     x_webhook_secret: str = Header(...)
 ):
+    # Authenticate the incoming webhook
     if x_webhook_secret != WEBHOOK_SECRET:
         raise HTTPException(
             status_code=401,
             detail="Invalid webhook authentication"
         )
 
-    severity = alert.severity.lower()
+    # Normalize severity
+    severity = alert.severity.strip().lower()
 
-    if severity in ["critical", "high"]:
-        status = "RESPONSE_REQUIRED"
-        containment = contain_host(alert.hostname)
-    else:
-        status = "MONITOR"
-        containment = None
-
+    # Extract alert indicators
     indicators = extract_indicators(alert)
 
+    # Classify the alert and simulate containment when necessary
+    if severity in ["critical", "high"]:
+        status = "RESPONSE_REQUIRED"
+
+        containment = contain_host(alert.hostname)
+
+        containment_result = execute_containment(containment)
+
+    else:
+        status = "MONITOR"
+
+        containment = None
+        containment_result = None
+
+    # Create the incident record
     incident = Incident(
         incident_id=f"INC-{uuid4().hex[:8]}",
         alert_id=alert.alert_id,
@@ -107,12 +149,14 @@ def receive_edr_alert(
         user=alert.user,
         process=alert.process,
         sha256=alert.sha256,
-        status=status,
+        status=status
     )
 
+    # Return the complete processing result
     return {
         "message": "EDR alert received and incident created",
         "incident": incident,
         "extracted_indicators": indicators,
         "containment_action": containment,
+        "containment_result": containment_result
     }
