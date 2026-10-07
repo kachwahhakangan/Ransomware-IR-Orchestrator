@@ -74,6 +74,11 @@ class ContainmentResult(BaseModel):
     result: str
     management_connection: str
 
+class ResponsePlaybook(BaseModel):
+    name: str
+    severity: str
+    action: str
+    status: str
 
 # Create a simulated host containment request
 def contain_host(hostname: str) -> ContainmentAction:
@@ -95,7 +100,24 @@ def execute_containment(
         result="SIMULATED_SUCCESS",
         management_connection=action.management_connection
     )
+def select_playbook(severity: str) -> ResponsePlaybook:
+    severity = severity.strip().lower()
+    playbook = select_playbook(severity)
 
+    if severity in ["critical", "high"]:
+        return ResponsePlaybook(
+            name="RANSOMWARE_CONTAINMENT",
+            severity=severity.upper(),
+            action="NETWORK_ISOLATION",
+            status="READY"
+        )
+
+    return ResponsePlaybook(
+        name="MONITORING",
+        severity=severity.upper(),
+        action="NONE",
+        status="NO_ACTION_REQUIRED"
+    )
 
 # Root endpoint
 @app.get("/")
@@ -154,9 +176,10 @@ def receive_edr_alert(
 
     # Return the complete processing result
     return {
-        "message": "EDR alert received and incident created",
-        "incident": incident,
-        "extracted_indicators": indicators,
-        "containment_action": containment,
-        "containment_result": containment_result
-    }
+    "message": "EDR alert received and incident created",
+    "incident": incident,
+    "extracted_indicators": indicators,
+    "playbook": playbook,
+    "containment_action": containment,
+    "containment_result": containment_result
+}
