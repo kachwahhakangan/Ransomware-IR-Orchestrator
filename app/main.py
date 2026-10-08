@@ -59,12 +59,20 @@ class Incident(BaseModel):
     status: str
 
 
-# Model for a containment request
+# Model for a network containment request
 class ContainmentAction(BaseModel):
     action: str
     hostname: str
     status: str
     management_connection: str
+
+
+# Model for an account action
+class AccountAction(BaseModel):
+    action: str
+    username: str
+    status: str
+    result: str
 
 
 # Model for the containment execution result
@@ -74,11 +82,14 @@ class ContainmentResult(BaseModel):
     result: str
     management_connection: str
 
+
+# Model for the selected response playbook
 class ResponsePlaybook(BaseModel):
     name: str
     severity: str
     action: str
     status: str
+
 
 # Create a simulated host containment request
 def contain_host(hostname: str) -> ContainmentAction:
@@ -100,24 +111,37 @@ def execute_containment(
         result="SIMULATED_SUCCESS",
         management_connection=action.management_connection
     )
-def select_playbook(severity: str) -> ResponsePlaybook:
-    severity = severity.strip().lower()
-    playbook = select_playbook(severity)
 
-    if severity in ["critical", "high"]:
+
+# Simulate account suspension
+def suspend_account(username: str) -> AccountAction:
+    return AccountAction(
+        action="ACCOUNT_SUSPENSION",
+        username=username,
+        status="REQUESTED",
+        result="SIMULATED_SUCCESS"
+    )
+
+
+# Select the appropriate response playbook
+def select_playbook(severity: str) -> ResponsePlaybook:
+    normalized = severity.strip().lower()
+
+    if normalized in ["critical", "high"]:
         return ResponsePlaybook(
             name="RANSOMWARE_CONTAINMENT",
-            severity=severity.upper(),
+            severity=normalized.upper(),
             action="NETWORK_ISOLATION",
             status="READY"
         )
 
     return ResponsePlaybook(
         name="MONITORING",
-        severity=severity.upper(),
+        severity=normalized.upper(),
         action="NONE",
         status="NO_ACTION_REQUIRED"
     )
+
 
 # Root endpoint
 @app.get("/")
@@ -134,6 +158,7 @@ def receive_edr_alert(
     alert: EDRAlert,
     x_webhook_secret: str = Header(...)
 ):
+
     # Authenticate the incoming webhook
     if x_webhook_secret != WEBHOOK_SECRET:
         raise HTTPException(
@@ -144,10 +169,11 @@ def receive_edr_alert(
     # Normalize severity
     severity = alert.severity.strip().lower()
 
-    # Extract alert indicators
+    # Extract indicators and select response playbook
     indicators = extract_indicators(alert)
+    playbook = select_playbook(severity)
 
-    # Classify the alert and simulate containment when necessary
+    # Execute response actions for high-risk alerts
     if severity in ["critical", "high"]:
         status = "RESPONSE_REQUIRED"
 
@@ -155,11 +181,14 @@ def receive_edr_alert(
 
         containment_result = execute_containment(containment)
 
+        account_action = suspend_account(alert.user)
+
     else:
         status = "MONITOR"
 
         containment = None
         containment_result = None
+        account_action = None
 
     # Create the incident record
     incident = Incident(
@@ -176,10 +205,11 @@ def receive_edr_alert(
 
     # Return the complete processing result
     return {
-    "message": "EDR alert received and incident created",
-    "incident": incident,
-    "extracted_indicators": indicators,
-    "playbook": playbook,
-    "containment_action": containment,
-    "containment_result": containment_result
-}
+        "message": "EDR alert received and incident created",
+        "incident": incident,
+        "extracted_indicators": indicators,
+        "playbook": playbook,
+        "containment_action": containment,
+        "containment_result": containment_result,
+        "account_action": account_action
+    }
