@@ -74,6 +74,14 @@ class AccountAction(BaseModel):
     status: str
     result: str
 
+# Model for recording response actions
+class ResponseActionLog(BaseModel):
+    incident_id: str
+    action: str
+    target: str
+    status: str
+    result: str
+
 
 # Model for the containment execution result
 class ContainmentResult(BaseModel):
@@ -177,15 +185,16 @@ def receive_edr_alert(
     if severity in ["critical", "high"]:
         status = "RESPONSE_REQUIRED"
 
+        # Simulate host network isolation
         containment = contain_host(alert.hostname)
 
         containment_result = execute_containment(containment)
 
+        # Simulate account suspension
         account_action = suspend_account(alert.user)
 
     else:
         status = "MONITOR"
-
         containment = None
         containment_result = None
         account_action = None
@@ -203,6 +212,56 @@ def receive_edr_alert(
         status=status
     )
 
+    # Create an audit log for each response action
+    response_action_logs = []
+
+    if containment is not None and containment_result is not None:
+        response_action_logs.append(
+            ResponseActionLog(
+                incident_id=incident.incident_id,
+                action=containment.action,
+                target=containment.hostname,
+                status=containment.status,
+                result=containment_result.result
+            )
+        )
+
+    if account_action is not None:
+        response_action_logs.append(
+            ResponseActionLog(
+                incident_id=incident.incident_id,
+                action=account_action.action,
+                target=account_action.username,
+                status=account_action.status,
+                result=account_action.result
+            )
+        )
+
+
+    response_action_logs = []
+
+    if containment is not None and containment_result is not None:
+        response_action_logs.append(
+            ResponseActionLog(
+                incident_id=incident.incident_id,
+                action=containment.action,
+                target=containment.hostname,
+                status=containment.status,
+                result=containment_result.result
+            )
+        )
+
+    if account_action is not None:
+        response_action_logs.append(
+            ResponseActionLog(
+                incident_id=incident.incident_id,
+                action=account_action.action,
+                target=account_action.username,
+                status=account_action.status,
+                result=account_action.result
+            )
+        )
+
     # Return the complete processing result
     return {
         "message": "EDR alert received and incident created",
@@ -211,5 +270,6 @@ def receive_edr_alert(
         "playbook": playbook,
         "containment_action": containment,
         "containment_result": containment_result,
-        "account_action": account_action
+        "account_action": account_action,
+        "response_action_logs": response_action_logs
     }
