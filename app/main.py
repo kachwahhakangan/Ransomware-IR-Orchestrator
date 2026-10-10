@@ -9,7 +9,8 @@ app = FastAPI(
     description="Automated ransomware containment and incident response platform",
     version="0.1.0"
 )
-
+# In-memory storage for created incidents
+incidents_db = {}
 
 # Development-only webhook secret
 WEBHOOK_SECRET = "dev-edr-secret-123"
@@ -159,6 +160,23 @@ def root():
         "status": "operational"
     }
 
+# Retrieve all stored incidents
+@app.get("/incidents")
+def get_all_incidents():
+    return list(incidents_db.values())
+
+# Retrieve a specific incident by its ID
+@app.get("/incidents/{incident_id}")
+def get_incident(incident_id: str):
+    incident = incidents_db.get(incident_id)
+
+    if incident is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Incident not found"
+        )
+
+    return incident
 
 # Receive and process EDR alerts
 @app.post("/webhook/edr")
@@ -211,6 +229,9 @@ def receive_edr_alert(
         sha256=alert.sha256,
         status=status
     )
+
+     # Store the incident for later retrieval
+    incidents_db[incident.incident_id] = incident
 
     # Create an audit log for each response action
     response_action_logs = []
