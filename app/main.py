@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Header, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from uuid import uuid4
 
 
@@ -18,7 +18,7 @@ WEBHOOK_SECRET = "dev-edr-secret-123"
 
 # Model for incoming EDR alerts
 class EDRAlert(BaseModel):
-    alert_id: str
+    alert_id: str = Field(..., min_length=1)
     severity: str
     hostname: str
     ip: str
