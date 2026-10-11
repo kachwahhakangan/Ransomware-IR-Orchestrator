@@ -165,6 +165,41 @@ def root():
 def get_all_incidents():
     return list(incidents_db.values())
 
+    # Incident statistics dashboard
+@app.get("/incidents/stats")
+def get_incident_stats():
+    incidents = list(incidents_db.values())
+
+    total_incidents = len(incidents)
+
+    critical_incidents = sum(
+        1 for incident in incidents
+        if incident.severity.lower() == "critical"
+    )
+
+    high_incidents = sum(
+        1 for incident in incidents
+        if incident.severity.lower() == "high"
+    )
+
+    response_required = sum(
+        1 for incident in incidents
+        if incident.status == "RESPONSE_REQUIRED"
+    )
+
+    monitoring = sum(
+        1 for incident in incidents
+        if incident.status == "MONITOR"
+    )
+
+    return {
+        "total_incidents": total_incidents,
+        "critical_incidents": critical_incidents,
+        "high_incidents": high_incidents,
+        "response_required": response_required,
+        "monitoring": monitoring
+    }
+
 # Retrieve a specific incident by its ID
 @app.get("/incidents/{incident_id}")
 def get_incident(incident_id: str):
