@@ -19,7 +19,7 @@ WEBHOOK_SECRET = "dev-edr-secret-123"
 # Model for incoming EDR alerts
 class EDRAlert(BaseModel):
     alert_id: str = Field(..., min_length=1)
-    severity: str
+    severity: str = Field(..., pattern="^(critical|high|medium|low)$")
     hostname: str
     ip: str
     user: str
