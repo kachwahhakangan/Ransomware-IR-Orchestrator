@@ -12,6 +12,9 @@ app = FastAPI(
 # In-memory storage for created incidents
 incidents_db = {}
 
+# In-memory storage for forensic evidence
+evidence_db = {}
+
 # Development-only webhook secret
 WEBHOOK_SECRET = "dev-edr-secret-123"
 
@@ -46,6 +49,18 @@ def extract_indicators(alert: EDRAlert) -> AlertIndicators:
         sha256=alert.sha256
     )
 
+class ForensicEvidence(BaseModel):
+    evidence_id: str
+    incident_id: str
+    hostname: str
+    evidence_type: str
+    collection_status: str
+    sha256: str | None = None
+
+    # Model for an evidence recording request
+class EvidenceRequest(BaseModel):
+    evidence_type: str = Field(..., min_length=1)
+    sha256: str | None = None
 
 # Model for an incident
 class Incident(BaseModel):
@@ -212,6 +227,81 @@ def get_incident(incident_id: str):
         )
 
     return incident
+
+# Record forensic evidence metadata for an incident
+@app.post("/incidents/{incident_id}/evidence")
+def record_evidence(
+    incident_id: str,
+    request: EvidenceRequest
+):
+    # Check whether the incident exists
+    incident = incidents_db.get(incident_id)
+
+    if incident is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Incident not found"
+        )
+
+    # Create the evidence metadata record
+    evidence = ForensicEvidence(
+        evidence_id=f"EVD-{uuid4().hex[:8]}",
+        incident_id=incident_id,
+        hostname=incident.hostname,
+        evidence_type=request.evidence_type.strip().upper(),
+        collection_status="SIMULATED_NOT_COLLECTED",
+        sha256=request.sha256
+    )
+
+    # Store the evidence record
+    evidence_db[evidence.evidence_id] = evidence
+
+    # Return the result
+    return {
+        "message": "Evidence metadata recorded",
+        "note": "No actual forensic evidence was collected",
+        "evidence": evidence
+    }
+
+# Retrieve all evidence records for an incident
+@app.get("/incidents/{incident_id}/evidence")
+def get_incident_evidence(incident_id: str):
+
+    # Check whether the incident exists
+    incident = incidents_db.get(incident_id)
+
+    if incident is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Incident not found"
+        )
+
+    # Find evidence associated with this incident
+    evidence_records = [
+        evidence
+        for evidence in evidence_db.values()
+        if evidence.incident_id == incident_id
+    ]
+
+    return {
+        "incident_id": incident_id,
+        "total_evidence_records": len(evidence_records),
+        "evidence_records": evidence_records
+    }
+
+# Retrieve a specific evidence record by its ID
+@app.get("/evidence/{evidence_id}")
+def get_evidence(evidence_id: str):
+
+    evidence = evidence_db.get(evidence_id)
+
+    if evidence is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Evidence record not found"
+        )
+
+    return evidence
 
 # Receive and process EDR alerts
 @app.post("/webhook/edr")
