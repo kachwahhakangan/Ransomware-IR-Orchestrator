@@ -1,28 +1,48 @@
-from fastapi import FastAPI, Header, HTTPException
-from pydantic import BaseModel, Field
+﻿from contextlib import asynccontextmanager
 from uuid import uuid4
 
+from fastapi import FastAPI, Header, HTTPException
+from pydantic import BaseModel, Field
 
-# Initialize FastAPI application
+from app.database import get_connection, initialize_database
+
+# ==========================================
+# 1. INITIALIZE THE APPLICATION
+# ==========================================
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    initialize_database()
+    yield
+
+
 app = FastAPI(
     title="Ransomware IR Orchestrator",
     description="Automated ransomware containment and incident response platform",
-    version="0.1.0"
+    version="0.1.0",
+    lifespan=lifespan,
 )
-# In-memory storage for created incidents
-incidents_db = {}
 
-# In-memory storage for forensic evidence
-evidence_db = {}
 
-# Development-only webhook secret
+# ==========================================
+# 2. CONFIGURATION
+# ==========================================
+
+# Development-only webhook secret.
+# Use an environment variable for real deployments.
 WEBHOOK_SECRET = "dev-edr-secret-123"
 
 
-# Model for incoming EDR alerts
+# ==========================================
+# 3. DATA MODELS
+# ==========================================
+
 class EDRAlert(BaseModel):
     alert_id: str = Field(..., min_length=1)
-    severity: str = Field(..., pattern="^(critical|high|medium|low)$")
+    severity: str = Field(
+        ...,
+        pattern="^(critical|high|medium|low)$",
+    )
     hostname: str
     ip: str
     user: str
@@ -30,7 +50,6 @@ class EDRAlert(BaseModel):
     sha256: str
 
 
-# Model for extracted alert indicators
 class AlertIndicators(BaseModel):
     hostname: str
     ip: str
@@ -38,16 +57,6 @@ class AlertIndicators(BaseModel):
     process: str
     sha256: str
 
-
-# Extract important indicators from an alert
-def extract_indicators(alert: EDRAlert) -> AlertIndicators:
-    return AlertIndicators(
-        hostname=alert.hostname,
-        ip=alert.ip,
-        user=alert.user,
-        process=alert.process,
-        sha256=alert.sha256
-    )
 
 class ForensicEvidence(BaseModel):
     evidence_id: str
@@ -57,12 +66,12 @@ class ForensicEvidence(BaseModel):
     collection_status: str
     sha256: str | None = None
 
-    # Model for an evidence recording request
+
 class EvidenceRequest(BaseModel):
     evidence_type: str = Field(..., min_length=1)
     sha256: str | None = None
 
-# Model for an incident
+
 class Incident(BaseModel):
     incident_id: str
     alert_id: str
@@ -75,7 +84,6 @@ class Incident(BaseModel):
     status: str
 
 
-# Model for a network containment request
 class ContainmentAction(BaseModel):
     action: str
     hostname: str
@@ -83,14 +91,13 @@ class ContainmentAction(BaseModel):
     management_connection: str
 
 
-# Model for an account action
 class AccountAction(BaseModel):
     action: str
     username: str
     status: str
     result: str
 
-# Model for recording response actions
+
 class ResponseActionLog(BaseModel):
     incident_id: str
     action: str
@@ -99,7 +106,6 @@ class ResponseActionLog(BaseModel):
     result: str
 
 
-# Model for the containment execution result
 class ContainmentResult(BaseModel):
     hostname: str
     action: str
@@ -107,7 +113,6 @@ class ContainmentResult(BaseModel):
     management_connection: str
 
 
-# Model for the selected response playbook
 class ResponsePlaybook(BaseModel):
     name: str
     severity: str
@@ -115,39 +120,49 @@ class ResponsePlaybook(BaseModel):
     status: str
 
 
-# Create a simulated host containment request
+# ==========================================
+# 4. HELPER FUNCTIONS
+# ==========================================
+
+def extract_indicators(alert: EDRAlert) -> AlertIndicators:
+    return AlertIndicators(
+        hostname=alert.hostname,
+        ip=alert.ip,
+        user=alert.user,
+        process=alert.process,
+        sha256=alert.sha256,
+    )
+
+
 def contain_host(hostname: str) -> ContainmentAction:
     return ContainmentAction(
         action="NETWORK_ISOLATION",
         hostname=hostname,
         status="REQUESTED",
-        management_connection="MAINTAINED"
+        management_connection="MAINTAINED",
     )
 
 
-# Simulate execution of a containment request
 def execute_containment(
-    action: ContainmentAction
+    action: ContainmentAction,
 ) -> ContainmentResult:
     return ContainmentResult(
         hostname=action.hostname,
         action=action.action,
         result="SIMULATED_SUCCESS",
-        management_connection=action.management_connection
+        management_connection=action.management_connection,
     )
 
 
-# Simulate account suspension
 def suspend_account(username: str) -> AccountAction:
     return AccountAction(
         action="ACCOUNT_SUSPENSION",
         username=username,
         status="REQUESTED",
-        result="SIMULATED_SUCCESS"
+        result="SIMULATED_SUCCESS",
     )
 
 
-# Select the appropriate response playbook
 def select_playbook(severity: str) -> ResponsePlaybook:
     normalized = severity.strip().lower()
 
@@ -156,209 +171,314 @@ def select_playbook(severity: str) -> ResponsePlaybook:
             name="RANSOMWARE_CONTAINMENT",
             severity=normalized.upper(),
             action="NETWORK_ISOLATION",
-            status="READY"
+            status="READY",
         )
 
     return ResponsePlaybook(
         name="MONITORING",
         severity=normalized.upper(),
         action="NONE",
-        status="NO_ACTION_REQUIRED"
+        status="NO_ACTION_REQUIRED",
     )
 
 
-# Root endpoint
+# ==========================================
+# 5. ROOT ENDPOINT
+# ==========================================
+
 @app.get("/")
 def root():
     return {
         "message": "Ransomware IR Orchestrator is running",
-        "status": "operational"
+        "status": "operational",
     }
 
-# Retrieve all stored incidents
+
+# ==========================================
+# 6. INCIDENT ENDPOINTS
+# ==========================================
+
 @app.get("/incidents")
 def get_all_incidents():
-    return list(incidents_db.values())
+    with get_connection() as connection:
+        rows = connection.execute(
+            "SELECT * FROM incidents ORDER BY rowid DESC"
+        ).fetchall()
 
-    # Incident statistics dashboard
+    return [dict(row) for row in rows]
+
+
 @app.get("/incidents/stats")
 def get_incident_stats():
-    incidents = list(incidents_db.values())
+    with get_connection() as connection:
+        rows = connection.execute(
+            "SELECT severity, status FROM incidents"
+        ).fetchall()
 
-    total_incidents = len(incidents)
-
-    critical_incidents = sum(
-        1 for incident in incidents
-        if incident.severity.lower() == "critical"
-    )
-
-    high_incidents = sum(
-        1 for incident in incidents
-        if incident.severity.lower() == "high"
-    )
-
-    response_required = sum(
-        1 for incident in incidents
-        if incident.status == "RESPONSE_REQUIRED"
-    )
-
-    monitoring = sum(
-        1 for incident in incidents
-        if incident.status == "MONITOR"
-    )
+    incidents = [dict(row) for row in rows]
 
     return {
-        "total_incidents": total_incidents,
-        "critical_incidents": critical_incidents,
-        "high_incidents": high_incidents,
-        "response_required": response_required,
-        "monitoring": monitoring
+        "total_incidents": len(incidents),
+        "critical_incidents": sum(
+            1
+            for incident in incidents
+            if incident["severity"].lower() == "critical"
+        ),
+        "high_incidents": sum(
+            1
+            for incident in incidents
+            if incident["severity"].lower() == "high"
+        ),
+        "response_required": sum(
+            1
+            for incident in incidents
+            if incident["status"] == "RESPONSE_REQUIRED"
+        ),
+        "monitoring": sum(
+            1
+            for incident in incidents
+            if incident["status"] == "MONITOR"
+        ),
     }
 
-# Retrieve a specific incident by its ID
+
 @app.get("/incidents/{incident_id}")
 def get_incident(incident_id: str):
-    incident = incidents_db.get(incident_id)
+    with get_connection() as connection:
+        row = connection.execute(
+            "SELECT * FROM incidents WHERE incident_id = ?",
+            (incident_id,),
+        ).fetchone()
 
-    if incident is None:
+    if row is None:
         raise HTTPException(
             status_code=404,
-            detail="Incident not found"
+            detail="Incident not found",
         )
 
-    return incident
+    return dict(row)
 
-# Record forensic evidence metadata for an incident
+
+# ==========================================
+# 7. FORENSIC EVIDENCE ENDPOINTS
+# ==========================================
+
 @app.post("/incidents/{incident_id}/evidence")
 def record_evidence(
     incident_id: str,
-    request: EvidenceRequest
+    request: EvidenceRequest,
 ):
-    # Check whether the incident exists
-    incident = incidents_db.get(incident_id)
+    with get_connection() as connection:
+        incident = connection.execute(
+            "SELECT hostname FROM incidents WHERE incident_id = ?",
+            (incident_id,),
+        ).fetchone()
 
-    if incident is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Incident not found"
+        if incident is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Incident not found",
+            )
+
+        evidence = ForensicEvidence(
+            evidence_id=f"EVD-{uuid4().hex[:8]}",
+            incident_id=incident_id,
+            hostname=incident["hostname"],
+            evidence_type=request.evidence_type.strip().upper(),
+            collection_status="SIMULATED_NOT_COLLECTED",
+            sha256=request.sha256,
         )
 
-    # Create the evidence metadata record
-    evidence = ForensicEvidence(
-        evidence_id=f"EVD-{uuid4().hex[:8]}",
-        incident_id=incident_id,
-        hostname=incident.hostname,
-        evidence_type=request.evidence_type.strip().upper(),
-        collection_status="SIMULATED_NOT_COLLECTED",
-        sha256=request.sha256
-    )
+        connection.execute(
+            """
+            INSERT INTO evidence (
+                evidence_id,
+                incident_id,
+                hostname,
+                evidence_type,
+                collection_status,
+                sha256
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                evidence.evidence_id,
+                evidence.incident_id,
+                evidence.hostname,
+                evidence.evidence_type,
+                evidence.collection_status,
+                evidence.sha256,
+            ),
+        )
 
-    # Store the evidence record
-    evidence_db[evidence.evidence_id] = evidence
-
-    # Return the result
     return {
         "message": "Evidence metadata recorded",
         "note": "No actual forensic evidence was collected",
-        "evidence": evidence
+        "evidence": evidence,
     }
 
-# Retrieve all evidence records for an incident
+
 @app.get("/incidents/{incident_id}/evidence")
 def get_incident_evidence(incident_id: str):
+    with get_connection() as connection:
+        incident = connection.execute(
+            "SELECT incident_id FROM incidents WHERE incident_id = ?",
+            (incident_id,),
+        ).fetchone()
 
-    # Check whether the incident exists
-    incident = incidents_db.get(incident_id)
+        if incident is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Incident not found",
+            )
 
-    if incident is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Incident not found"
-        )
+        rows = connection.execute(
+            "SELECT * FROM evidence WHERE incident_id = ?",
+            (incident_id,),
+        ).fetchall()
 
-    # Find evidence associated with this incident
-    evidence_records = [
-        evidence
-        for evidence in evidence_db.values()
-        if evidence.incident_id == incident_id
-    ]
+    evidence_records = [dict(row) for row in rows]
 
     return {
         "incident_id": incident_id,
         "total_evidence_records": len(evidence_records),
-        "evidence_records": evidence_records
+        "evidence_records": evidence_records,
     }
 
-# Retrieve a specific evidence record by its ID
+
 @app.get("/evidence/{evidence_id}")
 def get_evidence(evidence_id: str):
+    with get_connection() as connection:
+        row = connection.execute(
+            "SELECT * FROM evidence WHERE evidence_id = ?",
+            (evidence_id,),
+        ).fetchone()
 
-    evidence = evidence_db.get(evidence_id)
-
-    if evidence is None:
+    if row is None:
         raise HTTPException(
             status_code=404,
-            detail="Evidence record not found"
+            detail="Evidence record not found",
         )
 
-    return evidence
+    return dict(row)
 
-# Receive and process EDR alerts
+
+# ==========================================
+# 8. EDR WEBHOOK ENDPOINT
+# ==========================================
+
+@app.get("/incidents/{incident_id}/response-actions")
+def get_incident_response_actions(incident_id: str):
+    with get_connection() as connection:
+        incident = connection.execute(
+            "SELECT incident_id FROM incidents WHERE incident_id = ?",
+            (incident_id,),
+        ).fetchone()
+
+        if incident is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Incident not found",
+            )
+
+        rows = connection.execute(
+            """
+            SELECT
+                action_id,
+                incident_id,
+                action,
+                target,
+                status,
+                result,
+                created_at
+            FROM response_actions
+            WHERE incident_id = ?
+            ORDER BY created_at, action_id
+            """,
+            (incident_id,),
+        ).fetchall()
+
+        response_actions = [dict(row) for row in rows]
+
+    return {
+        "incident_id": incident_id,
+        "total_actions": len(response_actions),
+        "response_actions": response_actions,
+    }
+
 @app.post("/webhook/edr")
 def receive_edr_alert(
     alert: EDRAlert,
-    x_webhook_secret: str = Header(...)
+    x_webhook_secret: str = Header(...),
 ):
-
-    # Authenticate the incoming webhook
+    # Authenticate the incoming webhook.
     if x_webhook_secret != WEBHOOK_SECRET:
         raise HTTPException(
             status_code=401,
-            detail="Invalid webhook authentication"
+            detail="Invalid webhook authentication",
         )
 
-    # Normalize severity
     severity = alert.severity.strip().lower()
 
-    # Extract indicators and select response playbook
     indicators = extract_indicators(alert)
     playbook = select_playbook(severity)
 
-    # Execute response actions for high-risk alerts
+    containment = None
+    containment_result = None
+    account_action = None
+
     if severity in ["critical", "high"]:
         status = "RESPONSE_REQUIRED"
 
-        # Simulate host network isolation
         containment = contain_host(alert.hostname)
-
         containment_result = execute_containment(containment)
-
-        # Simulate account suspension
         account_action = suspend_account(alert.user)
-
     else:
         status = "MONITOR"
-        containment = None
-        containment_result = None
-        account_action = None
 
-    # Create the incident record
     incident = Incident(
         incident_id=f"INC-{uuid4().hex[:8]}",
         alert_id=alert.alert_id,
-        severity=alert.severity,
+        severity=severity,
         hostname=alert.hostname,
         ip=alert.ip,
         user=alert.user,
         process=alert.process,
         sha256=alert.sha256,
-        status=status
+        status=status,
     )
 
-     # Store the incident for later retrieval
-    incidents_db[incident.incident_id] = incident
+    # Persist the incident in SQLite.
+    with get_connection() as connection:
+        connection.execute(
+            """
+            INSERT INTO incidents (
+                incident_id,
+                alert_id,
+                severity,
+                hostname,
+                ip,
+                user,
+                process,
+                sha256,
+                status
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                incident.incident_id,
+                incident.alert_id,
+                incident.severity,
+                incident.hostname,
+                incident.ip,
+                incident.user,
+                incident.process,
+                incident.sha256,
+                incident.status,
+            ),
+        )
 
-    # Create an audit log for each response action
+    # Prepare the response action logs.
     response_action_logs = []
 
     if containment is not None and containment_result is not None:
@@ -368,7 +488,7 @@ def receive_edr_alert(
                 action=containment.action,
                 target=containment.hostname,
                 status=containment.status,
-                result=containment_result.result
+                result=containment_result.result,
             )
         )
 
@@ -379,36 +499,37 @@ def receive_edr_alert(
                 action=account_action.action,
                 target=account_action.username,
                 status=account_action.status,
-                result=account_action.result
+                result=account_action.result,
             )
         )
 
+    if response_action_logs:
+        with get_connection() as connection:
+            for action_log in response_action_logs:
+                connection.execute(
+                    """
+                    INSERT INTO response_actions (
+                        action_id,
+                        incident_id,
+                        action,
+                        target,
+                        status,
+                        result
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        f"ACT-{uuid4().hex[:8]}",
+                        action_log.incident_id,
+                        action_log.action,
+                        action_log.target,
+                        action_log.status,
+                        action_log.result,
+                    ),
+                )
+            connection.commit()
 
-    response_action_logs = []
 
-    if containment is not None and containment_result is not None:
-        response_action_logs.append(
-            ResponseActionLog(
-                incident_id=incident.incident_id,
-                action=containment.action,
-                target=containment.hostname,
-                status=containment.status,
-                result=containment_result.result
-            )
-        )
-
-    if account_action is not None:
-        response_action_logs.append(
-            ResponseActionLog(
-                incident_id=incident.incident_id,
-                action=account_action.action,
-                target=account_action.username,
-                status=account_action.status,
-                result=account_action.result
-            )
-        )
-
-    # Return the complete processing result
     return {
         "message": "EDR alert received and incident created",
         "incident": incident,
@@ -417,5 +538,5 @@ def receive_edr_alert(
         "containment_action": containment,
         "containment_result": containment_result,
         "account_action": account_action,
-        "response_action_logs": response_action_logs
+        "response_action_logs": response_action_logs,
     }

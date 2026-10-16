@@ -7,3 +7,9 @@ __pycache__/
 
 # Environment variables and secrets
 .env
+# Local database and test data
+data/
+
+# Temporary backup files
+*.bak
+*.backup
