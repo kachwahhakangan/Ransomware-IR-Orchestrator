@@ -1,10 +1,13 @@
-﻿from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager
+from pathlib import Path
+from urllib import request
 from uuid import uuid4
 
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from app.database import get_connection, initialize_database
+from app.evidence_integrity import calculate_sha256
 
 # ==========================================
 # 1. INITIALIZE THE APPLICATION
@@ -70,6 +73,10 @@ class ForensicEvidence(BaseModel):
 class EvidenceRequest(BaseModel):
     evidence_type: str = Field(..., min_length=1)
     sha256: str | None = None
+
+class EvidenceIntegrityRequest(BaseModel):
+    file_name: str = Field(..., min_length=1)
+    expected_sha256: str = Field(..., min_length=64, max_length=64)
 
 
 class Incident(BaseModel):
@@ -344,7 +351,54 @@ def get_incident_evidence(incident_id: str):
         "total_evidence_records": len(evidence_records),
         "evidence_records": evidence_records,
     }
+@app.post("/evidence/verify-integrity")
+def verify_evidence_integrity(request: EvidenceIntegrityRequest):
+    # Restrict access to files inside the project's evidence directory.
+    evidence_dir = (Path(__file__).resolve().parent.parent / "evidence").resolve()
 
+    # Accept filenames only, not arbitrary filesystem paths.
+    if Path(request.file_name).name != request.file_name:
+        raise HTTPException(
+            status_code=400,
+            detail="Only evidence filenames are allowed.",
+        )
+
+    file_path = (evidence_dir / request.file_name).resolve()
+
+    # Verify that the resolved path stays inside the evidence directory.
+    if not file_path.is_relative_to(evidence_dir):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid evidence file path.",
+        )
+
+    if not file_path.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail="Evidence file not found.",
+        )
+
+    try:
+        actual_sha256 = calculate_sha256(file_path)
+    except OSError:
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to read the evidence file.",
+        )
+
+    integrity_verified = (
+        actual_sha256.lower() == request.expected_sha256.lower()
+    )
+
+    return {
+        "file_name": request.file_name,
+        "expected_sha256": request.expected_sha256,
+        "actual_sha256": actual_sha256,
+        "integrity_verified": integrity_verified,
+        "status": "INTEGRITY_VERIFIED"
+        if integrity_verified
+        else "INTEGRITY_MISMATCH",
+    }
 
 @app.get("/evidence/{evidence_id}")
 def get_evidence(evidence_id: str):
