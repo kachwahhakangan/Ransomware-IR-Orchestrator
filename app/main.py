@@ -1,6 +1,5 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
-from urllib import request
 from uuid import uuid4
 
 from fastapi import FastAPI, Header, HTTPException
