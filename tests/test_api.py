@@ -1,11 +1,9 @@
-from uuid import uuid4
-
-from app.database import get_connection
-
 import unittest
+from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
+from app.database import get_connection
 from app.main import app
 
 
