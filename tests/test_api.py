@@ -1,3 +1,7 @@
+from uuid import uuid4
+
+from app.database import get_connection
+
 import unittest
 
 from fastapi.testclient import TestClient
@@ -61,7 +65,84 @@ class TestAPI(unittest.TestCase):
             headers={"X-Webhook-Secret": "dev-edr-secret-123"},
         )
         self.assertEqual(response.status_code, 422)
+    def test_response_actions_for_existing_incident(self):
+        incident_id = f"INC-TEST-{uuid4().hex[:8]}"
+        action_id = f"ACT-TEST-{uuid4().hex[:8]}"
 
+        try:
+            with get_connection() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO incidents (
+                        incident_id, alert_id, severity, hostname,
+                        ip, user, process, sha256, status
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        incident_id,
+                        "ALERT-TEST",
+                        "high",
+                        "TEST-PC",
+                        "192.168.1.10",
+                        "test-user",
+                        "test.exe",
+                        "a" * 64,
+                        "RESPONSE_REQUIRED",
+                    ),
+                )
+
+                connection.execute(
+                    """
+                    INSERT INTO response_actions (
+                        action_id, incident_id, action,
+                        target, status, result
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        action_id,
+                        incident_id,
+                        "NETWORK_ISOLATION",
+                        "TEST-PC",
+                        "SIMULATED",
+                        "Test action recorded",
+                    ),
+                )
+
+            response = self.client.get(
+                f"/incidents/{incident_id}/response-actions"
+            )
+
+            self.assertEqual(response.status_code, 200)
+
+            data = response.json()
+            self.assertEqual(data["incident_id"], incident_id)
+            self.assertEqual(data["total_actions"], 1)
+            self.assertEqual(
+                data["response_actions"][0]["action"],
+                "NETWORK_ISOLATION",
+            )
+
+        finally:
+            with get_connection() as connection:
+                connection.execute(
+                    "DELETE FROM incidents WHERE incident_id = ?",
+                    (incident_id,),
+                )
+
+    def test_response_actions_for_nonexistent_incident(self):
+        incident_id = f"INC-MISSING-{uuid4().hex[:8]}"
+
+        response = self.client.get(
+            f"/incidents/{incident_id}/response-actions"
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(
+            response.json()["detail"],
+            "Incident not found",
+        )
 
 if __name__ == "__main__":
     unittest.main()
