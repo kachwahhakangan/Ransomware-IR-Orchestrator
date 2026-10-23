@@ -111,6 +111,12 @@ class ResponseActionLog(BaseModel):
     status: str
     result: str
 
+class ResponseActionUpdate(BaseModel):
+    status: str = Field(
+        ...,
+        pattern="^(PENDING|IN_PROGRESS|COMPLETED|FAILED)$",
+    )
+    result: str = Field(..., min_length=1, max_length=500)
 
 class ContainmentResult(BaseModel):
     hostname: str
@@ -459,6 +465,94 @@ def get_incident_response_actions(incident_id: str):
         "response_actions": response_actions,
     }
 
+@app.patch(
+    "/incidents/{incident_id}/response-actions/{action_id}"
+)
+def update_response_action(
+    incident_id: str,
+    action_id: str,
+    update: ResponseActionUpdate,
+):
+    allowed_transitions = {
+        "PENDING": {"IN_PROGRESS", "FAILED"},
+        "IN_PROGRESS": {"COMPLETED", "FAILED"},
+        "COMPLETED": set(),
+        "FAILED": set(),
+    }
+
+    with get_connection() as connection:
+        incident = connection.execute(
+            "SELECT incident_id FROM incidents WHERE incident_id = ?",
+            (incident_id,),
+        ).fetchone()
+
+        if incident is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Incident not found",
+            )
+
+        action = connection.execute(
+            """
+            SELECT action_id, status
+            FROM response_actions
+            WHERE action_id = ? AND incident_id = ?
+            """,
+            (action_id, incident_id),
+        ).fetchone()
+
+        if action is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Response action not found",
+            )
+
+        current_status = action["status"]
+        new_status = update.status
+
+        if new_status not in allowed_transitions.get(
+            current_status,
+            set(),
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Cannot transition response action "
+                    f"from {current_status} to {new_status}"
+                ),
+            )
+
+        connection.execute(
+            """
+            UPDATE response_actions
+            SET status = ?, result = ?
+            WHERE action_id = ? AND incident_id = ?
+            """,
+            (
+                new_status,
+                update.result,
+                action_id,
+                incident_id,
+            ),
+        )
+
+        updated_action = connection.execute(
+            """
+            SELECT
+                action_id,
+                incident_id,
+                action,
+                target,
+                status,
+                result,
+                created_at
+            FROM response_actions
+            WHERE action_id = ? AND incident_id = ?
+            """,
+            (action_id, incident_id),
+        ).fetchone()
+
+    return dict(updated_action)
 @app.post("/webhook/edr")
 def receive_edr_alert(
     alert: EDRAlert,

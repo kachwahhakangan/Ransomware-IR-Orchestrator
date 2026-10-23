@@ -141,6 +141,242 @@ class TestAPI(unittest.TestCase):
             response.json()["detail"],
             "Incident not found",
         )
+    def test_update_response_action_status(self):
+        incident_id = f"INC-TEST-{uuid4().hex[:8]}"
+        action_id = f"ACT-TEST-{uuid4().hex[:8]}"
 
+        try:
+            with get_connection() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO incidents (
+                        incident_id, alert_id, severity, hostname,
+                        ip, user, process, sha256, status
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        incident_id,
+                        f"ALERT-{uuid4().hex[:8]}",
+                        "high",
+                        "TEST-PC",
+                        "192.168.1.10",
+                        "test-user",
+                        "test.exe",
+                        "a" * 64,
+                        "RESPONSE_REQUIRED",
+                    ),
+                )
+
+                connection.execute(
+                    """
+                    INSERT INTO response_actions (
+                        action_id, incident_id, action,
+                        target, status, result
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        action_id,
+                        incident_id,
+                        "NETWORK_ISOLATION",
+                        "TEST-PC",
+                        "PENDING",
+                        "Waiting to start",
+                    ),
+                )
+
+            response = self.client.patch(
+                f"/incidents/{incident_id}/response-actions/{action_id}",
+                json={
+                    "status": "IN_PROGRESS",
+                    "result": "Action started in simulation",
+                },
+            )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["status"], "IN_PROGRESS")
+            self.assertEqual(
+                response.json()["result"],
+                "Action started in simulation",
+            )
+
+        finally:
+            with get_connection() as connection:
+                connection.execute(
+                    "DELETE FROM incidents WHERE incident_id = ?",
+                    (incident_id,),
+                )
+
+    def test_reject_invalid_response_action_transition(self):
+        incident_id = f"INC-TEST-{uuid4().hex[:8]}"
+        action_id = f"ACT-TEST-{uuid4().hex[:8]}"
+
+        try:
+            with get_connection() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO incidents (
+                        incident_id, alert_id, severity, hostname,
+                        ip, user, process, sha256, status
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        incident_id,
+                        f"ALERT-{uuid4().hex[:8]}",
+                        "high",
+                        "TEST-PC",
+                        "192.168.1.10",
+                        "test-user",
+                        "test.exe",
+                        "a" * 64,
+                        "RESPONSE_REQUIRED",
+                    ),
+                )
+
+                connection.execute(
+                    """
+                    INSERT INTO response_actions (
+                        action_id, incident_id, action,
+                        target, status, result
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        action_id,
+                        incident_id,
+                        "NETWORK_ISOLATION",
+                        "TEST-PC",
+                        "COMPLETED",
+                        "Simulation completed",
+                    ),
+                )
+
+            response = self.client.patch(
+                f"/incidents/{incident_id}/response-actions/{action_id}",
+                json={
+                    "status": "PENDING",
+                    "result": "Trying to reset status",
+                },
+            )
+
+            self.assertEqual(response.status_code, 409)
+
+        finally:
+            with get_connection() as connection:
+                connection.execute(
+                    "DELETE FROM incidents WHERE incident_id = ?",
+                    (incident_id,),
+                )
+
+    def test_update_nonexistent_response_action(self):
+        incident_id = f"INC-TEST-{uuid4().hex[:8]}"
+
+        try:
+            with get_connection() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO incidents (
+                        incident_id, alert_id, severity, hostname,
+                        ip, user, process, sha256, status
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        incident_id,
+                        f"ALERT-{uuid4().hex[:8]}",
+                        "high",
+                        "TEST-PC",
+                        "192.168.1.10",
+                        "test-user",
+                        "test.exe",
+                        "a" * 64,
+                        "RESPONSE_REQUIRED",
+                    ),
+                )
+
+            response = self.client.patch(
+                f"/incidents/{incident_id}/response-actions/ACT-MISSING",
+                json={
+                    "status": "IN_PROGRESS",
+                    "result": "Test update",
+                },
+            )
+
+            self.assertEqual(response.status_code, 404)
+            self.assertEqual(
+                response.json()["detail"],
+                "Response action not found",
+            )
+
+        finally:
+            with get_connection() as connection:
+                connection.execute(
+                    "DELETE FROM incidents WHERE incident_id = ?",
+                    (incident_id,),
+                )
+
+    def test_reject_invalid_response_action_status(self):
+        incident_id = f"INC-TEST-{uuid4().hex[:8]}"
+        action_id = f"ACT-TEST-{uuid4().hex[:8]}"
+
+        try:
+            with get_connection() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO incidents (
+                        incident_id, alert_id, severity, hostname,
+                        ip, user, process, sha256, status
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        incident_id,
+                        f"ALERT-{uuid4().hex[:8]}",
+                        "high",
+                        "TEST-PC",
+                        "192.168.1.10",
+                        "test-user",
+                        "test.exe",
+                        "a" * 64,
+                        "RESPONSE_REQUIRED",
+                    ),
+                )
+
+                connection.execute(
+                    """
+                    INSERT INTO response_actions (
+                        action_id, incident_id, action,
+                        target, status, result
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        action_id,
+                        incident_id,
+                        "NETWORK_ISOLATION",
+                        "TEST-PC",
+                        "PENDING",
+                        "Waiting to start",
+                    ),
+                )
+
+            response = self.client.patch(
+                f"/incidents/{incident_id}/response-actions/{action_id}",
+                json={
+                    "status": "UNKNOWN",
+                    "result": "Invalid status test",
+                },
+            )
+
+            self.assertEqual(response.status_code, 422)
+
+        finally:
+            with get_connection() as connection:
+                connection.execute(
+                    "DELETE FROM incidents WHERE incident_id = ?",
+                    (incident_id,),
+                )
 if __name__ == "__main__":
     unittest.main()
