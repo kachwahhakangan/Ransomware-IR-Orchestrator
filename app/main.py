@@ -269,7 +269,85 @@ def get_incident(incident_id: str):
         )
 
     return dict(row)
+@app.get("/incidents/{incident_id}/report")
+def get_incident_report(incident_id: str):
+    with get_connection() as connection:
+        incident_row = connection.execute(
+            "SELECT * FROM incidents WHERE incident_id = ?",
+            (incident_id,),
+        ).fetchone()
 
+        if incident_row is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Incident not found",
+            )
+
+        evidence_rows = connection.execute(
+            """
+            SELECT
+                evidence_id,
+                incident_id,
+                hostname,
+                evidence_type,
+                collection_status,
+                sha256
+            FROM evidence
+            WHERE incident_id = ?
+            ORDER BY rowid
+            """,
+            (incident_id,),
+        ).fetchall()
+
+        action_rows = connection.execute(
+            """
+            SELECT
+                action_id,
+                incident_id,
+                action,
+                target,
+                status,
+                result,
+                created_at
+            FROM response_actions
+            WHERE incident_id = ?
+            ORDER BY created_at, action_id
+            """,
+            (incident_id,),
+        ).fetchall()
+
+    incident = dict(incident_row)
+    evidence = [dict(row) for row in evidence_rows]
+    actions = [dict(row) for row in action_rows]
+
+    return {
+        "incident_id": incident_id,
+        "incident": incident,
+        "evidence_summary": {
+            "total": len(evidence),
+        },
+        "response_summary": {
+            "total": len(actions),
+            "completed": sum(
+                1 for action in actions
+                if action["status"].upper() == "COMPLETED"
+            ),
+            "failed": sum(
+                1 for action in actions
+                if action["status"].upper() == "FAILED"
+            ),
+            "in_progress": sum(
+                1 for action in actions
+                if action["status"].upper() == "IN_PROGRESS"
+            ),
+            "pending": sum(
+                1 for action in actions
+                if action["status"].upper() == "PENDING"
+            ),
+        },
+        "evidence": evidence,
+        "response_actions": actions,
+    }
 
 # ==========================================
 # 7. FORENSIC EVIDENCE ENDPOINTS

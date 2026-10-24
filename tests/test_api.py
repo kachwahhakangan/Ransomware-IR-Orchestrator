@@ -378,5 +378,91 @@ class TestAPI(unittest.TestCase):
                     "DELETE FROM incidents WHERE incident_id = ?",
                     (incident_id,),
                 )
+
+    def test_incident_report_for_existing_incident(self):
+        incident_id = f"INC-REPORT-{uuid4().hex[:8]}"
+
+        try:
+            with get_connection() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO incidents (
+                        incident_id, alert_id, severity, hostname,
+                        ip, user, process, sha256, status
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        incident_id,
+                        f"ALERT-{uuid4().hex[:8]}",
+                        "critical",
+                        "REPORT-PC",
+                        "192.168.1.50",
+                        "test-user",
+                        "suspicious.exe",
+                        "a" * 64,
+                        "RESPONSE_REQUIRED",
+                    ),
+                )
+
+                connection.execute(
+                    """
+                    INSERT INTO response_actions (
+                        action_id, incident_id, action,
+                        target, status, result
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        f"ACT-{uuid4().hex[:8]}",
+                        incident_id,
+                        "NETWORK_ISOLATION",
+                        "REPORT-PC",
+                        "COMPLETED",
+                        "Isolation simulated successfully",
+                    ),
+                )
+
+            response = self.client.get(
+                f"/incidents/{incident_id}/report"
+            )
+
+            self.assertEqual(response.status_code, 200)
+
+            report = response.json()
+
+            self.assertEqual(report["incident_id"], incident_id)
+            self.assertEqual(
+                report["incident"]["hostname"],
+                "REPORT-PC",
+            )
+            self.assertIn("evidence", report)
+            self.assertIn("response_actions", report)
+            self.assertIn("evidence_summary", report)
+            self.assertIn("response_summary", report)
+
+            self.assertEqual(
+                report["response_summary"]["total"],
+                len(report["response_actions"]),
+            )
+            self.assertEqual(
+                report["response_summary"]["completed"],
+                1,
+            )
+
+        finally:
+            with get_connection() as connection:
+                connection.execute(
+                    "DELETE FROM incidents WHERE incident_id = ?",
+                    (incident_id,),
+                )
+
+    def test_incident_report_for_nonexistent_incident(self):
+        response = self.client.get(
+            "/incidents/INC-REPORT-MISSING/report"
+        )
+
+        self.assertEqual(response.status_code, 404)
+
 if __name__ == "__main__":
     unittest.main()
