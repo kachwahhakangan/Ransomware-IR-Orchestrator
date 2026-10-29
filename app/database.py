@@ -1,4 +1,5 @@
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -9,11 +10,20 @@ DATA_DIR.mkdir(exist_ok=True)
 DATABASE_PATH = DATA_DIR / "incidents.db"
 
 
+@contextmanager
 def get_connection():
     connection = sqlite3.connect(DATABASE_PATH)
     connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA foreign_keys = ON")
-    return connection
+
+    try:
+        connection.execute("PRAGMA foreign_keys = ON")
+        yield connection
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
 
 
 def initialize_database():
@@ -45,6 +55,7 @@ def initialize_database():
                     ON DELETE CASCADE
             )
         """)
+
         connection.execute("""
             CREATE TABLE IF NOT EXISTS response_actions (
                 action_id TEXT PRIMARY KEY,
@@ -59,5 +70,3 @@ def initialize_database():
                     ON DELETE CASCADE
             )
         """)
-
-        connection.commit()
