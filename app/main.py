@@ -194,6 +194,32 @@ def select_playbook(severity: str) -> ResponsePlaybook:
     )
 
 
+def log_incident_event(
+    incident_id: str,
+    event_type: str,
+    description: str,
+):
+    """Record an incident event in the database."""
+    with get_connection() as connection:
+        connection.execute(
+            """
+            INSERT INTO incident_events (
+                event_id,
+                incident_id,
+                event_type,
+                description
+            )
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                f"EVT-{uuid4().hex[:8]}",
+                incident_id,
+                event_type,
+                description,
+            ),
+        )
+
+
 # ==========================================
 # 5. ROOT ENDPOINT
 # ==========================================
@@ -269,6 +295,45 @@ def get_incident(incident_id: str):
         )
 
     return dict(row)
+
+@app.get("/incidents/{incident_id}/timeline")
+def get_incident_timeline(incident_id: str):
+    with get_connection() as connection:
+        incident = connection.execute(
+            "SELECT incident_id FROM incidents WHERE incident_id = ?",
+            (incident_id,),
+        ).fetchone()
+
+        if incident is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Incident not found",
+            )
+
+        rows = connection.execute(
+            """
+            SELECT
+                event_id,
+                incident_id,
+                event_type,
+                description,
+                created_at
+            FROM incident_events
+            WHERE incident_id = ?
+            ORDER BY created_at ASC, rowid ASC
+            """,
+            (incident_id,),
+        ).fetchall()
+
+    events = [dict(row) for row in rows]
+
+    return {
+        "incident_id": incident_id,
+        "total_events": len(events),
+        "timeline": events,
+    }
+
+
 @app.get("/incidents/{incident_id}/report")
 def get_incident_report(incident_id: str):
     with get_connection() as connection:
@@ -401,6 +466,16 @@ def record_evidence(
             ),
         )
 
+    # Record the evidence event in the incident timeline.
+    log_incident_event(
+        incident_id=incident_id,
+        event_type="EVIDENCE_RECORDED",
+        description=(
+            f"Evidence metadata recorded: "
+            f"{evidence.evidence_type} "
+            f"(ID: {evidence.evidence_id})."
+        ),
+    )
     return {
         "message": "Evidence metadata recorded",
         "note": "No actual forensic evidence was collected",
@@ -614,6 +689,27 @@ def update_response_action(
             ),
         )
 
+            # Record the response-action status change.
+        connection.execute(
+            """
+            INSERT INTO incident_events (
+                event_id,
+                incident_id,
+                event_type,
+                description
+            )
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                f"EVT-{uuid4().hex[:8]}",
+                incident_id,
+                "RESPONSE_STATUS_CHANGED",
+                (
+                    f"Response action {action_id} changed "
+                    f"from {current_status} to {new_status}."
+                ),
+            ),
+        )
         updated_action = connection.execute(
             """
             SELECT
@@ -703,6 +799,18 @@ def receive_edr_alert(
             ),
         )
 
+    # Record the incident creation event.
+    log_incident_event(
+        incident_id=incident.incident_id,
+        event_type="INCIDENT_CREATED",
+        description=(
+            f"Incident created from EDR alert "
+            f"{incident.alert_id} with severity "
+            f"{incident.severity}."
+        ),
+    )
+
+
     # Prepare the response action logs.
     response_action_logs = []
 
@@ -750,6 +858,28 @@ def receive_edr_alert(
                         action_log.target,
                         action_log.status,
                         action_log.result,
+                    ),
+                )
+
+                connection.execute(
+                    """
+                    INSERT INTO incident_events (
+                        event_id,
+                        incident_id,
+                        event_type,
+                        description
+                    )
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (
+                        f"EVT-{uuid4().hex[:8]}",
+                        action_log.incident_id,
+                        "RESPONSE_ACTION_CREATED",
+                        (
+                            f"Response action {action_log.action} "
+                            f"created for target {action_log.target} "
+                            f"with status {action_log.status}."
+                        ),
                     ),
                 )
             connection.commit()

@@ -464,5 +464,135 @@ class TestAPI(unittest.TestCase):
 
         self.assertEqual(response.status_code, 404)
 
+
+    def test_incident_timeline_for_existing_incident(self):
+        incident_id = f"INC-TIMELINE-{uuid4().hex[:8]}"
+
+        try:
+            with get_connection() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO incidents (
+                        incident_id, alert_id, severity, hostname,
+                        ip, user, process, sha256, status
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        incident_id,
+                        f"ALERT-{uuid4().hex[:8]}",
+                        "high",
+                        "TIMELINE-PC",
+                        "192.168.1.20",
+                        "test-user",
+                        "test.exe",
+                        "a" * 64,
+                        "RESPONSE_REQUIRED",
+                    ),
+                )
+
+                connection.execute(
+                    """
+                    INSERT INTO incident_events (
+                        event_id, incident_id, event_type, description
+                    )
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (
+                        f"EVT-{uuid4().hex[:8]}",
+                        incident_id,
+                        "INCIDENT_CREATED",
+                        "Test incident created",
+                    ),
+                )
+
+            response = self.client.get(
+                f"/incidents/{incident_id}/timeline"
+            )
+
+            self.assertEqual(response.status_code, 200)
+
+            data = response.json()
+            self.assertEqual(data["incident_id"], incident_id)
+            self.assertEqual(data["total_events"], 1)
+            self.assertEqual(
+                data["timeline"][0]["event_type"],
+                "INCIDENT_CREATED",
+            )
+            self.assertIn("created_at", data["timeline"][0])
+
+        finally:
+            with get_connection() as connection:
+                connection.execute(
+                    "DELETE FROM incidents WHERE incident_id = ?",
+                    (incident_id,),
+                )
+
+    def test_incident_timeline_for_nonexistent_incident(self):
+        response = self.client.get(
+            "/incidents/INC-TIMELINE-MISSING/timeline"
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(
+            response.json()["detail"],
+            "Incident not found",
+        )
+    def test_high_severity_webhook_records_timeline_events(self):
+        incident_id = None
+
+        try:
+            response = self.client.post(
+                "/webhook/edr",
+                headers={
+                    "X-Webhook-Secret": "dev-edr-secret-123"
+                },
+                json={
+                    "alert_id": f"ALERT-TIMELINE-{uuid4().hex[:8]}",
+                    "severity": "high",
+                    "hostname": "TIMELINE-WEBHOOK-PC",
+                    "ip": "192.168.1.50",
+                    "user": "timeline-test-user",
+                    "process": "suspicious.exe",
+                    "sha256": "a" * 64,
+                },
+            )
+
+            self.assertEqual(response.status_code, 200)
+
+            incident_id = response.json()["incident"]["incident_id"]
+
+            timeline_response = self.client.get(
+                f"/incidents/{incident_id}/timeline"
+            )
+
+            self.assertEqual(timeline_response.status_code, 200)
+
+            timeline = timeline_response.json()
+
+            self.assertEqual(timeline["total_events"], 3)
+
+            event_types = [
+                event["event_type"]
+                for event in timeline["timeline"]
+            ]
+
+            self.assertEqual(
+                event_types.count("INCIDENT_CREATED"),
+                1,
+            )
+
+            self.assertEqual(
+                event_types.count("RESPONSE_ACTION_CREATED"),
+                2,
+            )
+
+        finally:
+            if incident_id is not None:
+                with get_connection() as connection:
+                    connection.execute(
+                        "DELETE FROM incidents WHERE incident_id = ?",
+                        (incident_id,),
+                    )
 if __name__ == "__main__":
     unittest.main()

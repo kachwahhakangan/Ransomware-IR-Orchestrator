@@ -70,3 +70,17 @@ def initialize_database():
                     ON DELETE CASCADE
             )
         """)
+
+        # NEW TABLE: Incident event history
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS incident_events (
+                event_id TEXT PRIMARY KEY,
+                incident_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                description TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (incident_id)
+                    REFERENCES incidents (incident_id)
+                    ON DELETE CASCADE
+            )
+        """)
