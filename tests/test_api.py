@@ -90,6 +90,57 @@ class TestAPI(unittest.TestCase):
                     [(incident_id,) for incident_id in test_ids],
                 )
 
+    def test_incident_pagination(self):
+        test_ids = [
+            f"INC-PAGE-{uuid4().hex[:8]}"
+            for _ in range(3)
+        ]
+
+        try:
+            with get_connection() as connection:
+                for index, incident_id in enumerate(test_ids):
+                    connection.execute(
+                        """
+                        INSERT INTO incidents (
+                            incident_id, alert_id, severity, hostname,
+                            ip, user, process, sha256, status
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            incident_id,
+                            f"ALERT-PAGE-{index}",
+                            "high",
+                            f"PAGE-PC-{index}",
+                            "192.168.1.20",
+                            "test-user",
+                            "test.exe",
+                            "b" * 64,
+                            "RESPONSE_REQUIRED",
+                        ),
+                    )
+
+            response = self.client.get(
+                "/incidents",
+                params={"limit": 2, "offset": 1},
+            )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(len(response.json()), 2)
+
+            invalid_response = self.client.get(
+                "/incidents",
+                params={"limit": 101},
+            )
+
+            self.assertEqual(invalid_response.status_code, 422)
+
+        finally:
+            with get_connection() as connection:
+                connection.executemany(
+                    "DELETE FROM incidents WHERE incident_id = ?",
+                    [(incident_id,) for incident_id in test_ids],
+                )
     def test_incident_statistics(self):
         response = self.client.get("/incidents/stats")
         self.assertEqual(response.status_code, 200)

@@ -241,7 +241,21 @@ def get_all_incidents(
     severity: str | None = None,
     status: str | None = None,
     hostname: str | None = None,
+    limit: int = 10,
+    offset: int = 0,
 ):
+    if limit < 1 or limit > 100:
+        raise HTTPException(
+            status_code=422,
+            detail="Limit must be between 1 and 100",
+        )
+
+    if offset < 0:
+        raise HTTPException(
+            status_code=422,
+            detail="Offset cannot be negative",
+        )
+
     query = "SELECT * FROM incidents"
     conditions = []
     parameters = []
@@ -261,7 +275,8 @@ def get_all_incidents(
     if conditions:
         query += " WHERE " + " AND ".join(conditions)
 
-    query += " ORDER BY rowid DESC"
+    query += " ORDER BY rowid DESC LIMIT ? OFFSET ?"
+    parameters.extend([limit, offset])
 
     with get_connection() as connection:
         rows = connection.execute(query, parameters).fetchall()
