@@ -32,6 +32,63 @@ class TestAPI(unittest.TestCase):
         response = self.client.get("/incidents")
         self.assertEqual(response.status_code, 200)
         self.assertIsInstance(response.json(), list)
+    def test_incident_search_and_filtering(self):
+        test_ids = [
+            f"INC-FILTER-{uuid4().hex[:8]}"
+            for _ in range(3)
+        ]
+
+        test_data = [
+            (test_ids[0], "high", "RESPONSE_REQUIRED", "FILTER-PC-01"),
+            (test_ids[1], "critical", "RESPONSE_REQUIRED", "FILTER-PC-02"),
+            (test_ids[2], "low", "MONITOR", "OTHER-PC-01"),
+        ]
+
+        try:
+            with get_connection() as connection:
+                for incident_id, severity, status, hostname in test_data:
+                    connection.execute(
+                        """
+                        INSERT INTO incidents (
+                            incident_id, alert_id, severity, hostname,
+                            ip, user, process, sha256, status
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            incident_id,
+                            f"ALERT-{incident_id}",
+                            severity,
+                            hostname,
+                            "192.168.1.10",
+                            "test-user",
+                            "test.exe",
+                            "a" * 64,
+                            status,
+                        ),
+                    )
+
+            response = self.client.get(
+                "/incidents",
+                params={
+                    "severity": "high",
+                    "status": "RESPONSE_REQUIRED",
+                    "hostname": "FILTER-PC",
+                },
+            )
+
+            self.assertEqual(response.status_code, 200)
+            results = response.json()
+
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0]["incident_id"], test_ids[0])
+
+        finally:
+            with get_connection() as connection:
+                connection.executemany(
+                    "DELETE FROM incidents WHERE incident_id = ?",
+                    [(incident_id,) for incident_id in test_ids],
+                )
 
     def test_incident_statistics(self):
         response = self.client.get("/incidents/stats")

@@ -237,14 +237,36 @@ def root():
 # ==========================================
 
 @app.get("/incidents")
-def get_all_incidents():
+def get_all_incidents(
+    severity: str | None = None,
+    status: str | None = None,
+    hostname: str | None = None,
+):
+    query = "SELECT * FROM incidents"
+    conditions = []
+    parameters = []
+
+    if severity:
+        conditions.append("LOWER(severity) = LOWER(?)")
+        parameters.append(severity)
+
+    if status:
+        conditions.append("UPPER(status) = UPPER(?)")
+        parameters.append(status)
+
+    if hostname:
+        conditions.append("LOWER(hostname) LIKE LOWER(?)")
+        parameters.append(f"%{hostname}%")
+
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
+
+    query += " ORDER BY rowid DESC"
+
     with get_connection() as connection:
-        rows = connection.execute(
-            "SELECT * FROM incidents ORDER BY rowid DESC"
-        ).fetchall()
+        rows = connection.execute(query, parameters).fetchall()
 
     return [dict(row) for row in rows]
-
 
 @app.get("/incidents/stats")
 def get_incident_stats():
